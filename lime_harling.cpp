@@ -8,8 +8,10 @@
 #ifdef _WIN32
 #include "SDL.h"
 #else
-// SDL1:
+// For SDL 1
 // #include <SDL/SDL.h>
+
+// For SLD 2
 #include <SDL2/SDL.h>
 #endif
 
@@ -18,12 +20,13 @@
 #endif
 
 // Renderer size needs to be small to be usable in a web browser (emscripten)
-constexpr Uint16 SCREEN_WIDTH = 128;
-constexpr Uint16 SCREEN_HEIGHT = 64;
+constexpr Uint16 SCREEN_WIDTH = 256;
+constexpr Uint16 SCREEN_HEIGHT = 256;
 
+#if SDL_MAJOR_VERSION > 1
 static SDL_Window* window{};
 static SDL_Renderer* renderer{};
-#if SDL_MAJOR_VERSION < 2
+#else
 static SDL_Surface* screen{};
 #endif
 static Uint8 shift{};
@@ -41,11 +44,6 @@ void end_sdl()
 // Render a single frame, to be called from the main game loop function
 void render_frame()
 {
-  shift++;
-  if (shift > 255) {
-    shift = 0;
-  }
-
 #if SDL_MAJOR_VERSION > 1
   for (auto vert = 0; vert < SCREEN_HEIGHT; vert++)
   {
@@ -108,6 +106,10 @@ void render_frame()
 
   SDL_Flip(screen);
 #endif
+  shift++;
+  if (shift > 255) {
+    shift = 0;
+  }
 }
 
 // Main game loop that renders frames until user quits the game
@@ -115,6 +117,7 @@ static void game_loop()
 {
 #ifdef __EMSCRIPTEN__
   render_frame();
+#if SDL_MAJOR_VERSION > 1
   int w{};
   int h{};
   SDL_GetRendererOutputSize(renderer, &w, &h);
@@ -124,6 +127,7 @@ static void game_loop()
     emscripten_cancel_main_loop();
     return;
   }
+#endif
 
   if (SDL_PollEvent(&event)) {
     switch (event.type)
@@ -147,6 +151,8 @@ static void game_loop()
 #else
   auto want_out{ false };
   while (!want_out) {
+    auto start_ticks = SDL_GetTicks64();
+
     int w{};
     int h{};
     SDL_GetRendererOutputSize(renderer, &w, &h);
@@ -176,9 +182,13 @@ static void game_loop()
     }
 
     render_frame();
-
-    // 24 fps
-    std::this_thread::sleep_for(std::chrono::milliseconds(42));
+    auto end_ticks = SDL_GetTicks64();
+    auto frame_time = end_ticks - start_ticks;
+    if (frame_time > 0 && frame_time < 42)
+    {
+      // 24 fps
+      std::this_thread::sleep_for(std::chrono::milliseconds(42 - frame_time));
+    }
   }
 #endif
 }
@@ -203,13 +213,6 @@ int main(int, char**)
   SDL_SetRenderDrawColor(renderer, 12, 123, 50, 255);
   SDL_RenderClear(renderer);
 #else
-  screen = SDL_GetWindowSurface(window);
-  if (!screen) {
-    fprintf(stderr, "Screen surface could not be created: %s\n", SDL_GetError());
-    SDL_Quit();
-    return 1;
-  }
-
   screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_SWSURFACE);
 #endif
 
