@@ -18,3 +18,20 @@ SDL_Quit: () => {
   // out('SDL_Quit called (and ignored)');
 }
 ```
+
+
+## Building SDL code natively on Windows using C++
+
+Download the SDL release archive for your platform,
+such as `SDL2-devel-2.30.3-VC.zip` and extract it on your computer.
+
+Use a command such as
+```bash
+emcc -std=c++20 -o index.html lime_harling.cpp --use-port=sdl2
+```
+
+## Testing on your computer
+
+```bash
+emrun index.html
+```

@@ -4,4 +4,4 @@
 
 .PHONY : all
 all:
-	emcc -o index.html hello_world_sdl.cpp -O3 --shell-file html_template/shell_minimal.html
+	emcc -std=c++20 -o index.html lime_harling.cpp -O3 --use-port=sdl2 --shell-file html_template/shell_minimal.html
