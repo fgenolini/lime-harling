@@ -11,7 +11,7 @@
 #endif
 
 int main(int argc, char** argv) {
-  printf("hello, world!\n");
+  printf("Lime render of an external garden wall using a thrown mix of NHL lime and granite dust\n");
 
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Surface *screen = SDL_SetVideoMode(256, 256, 32, SDL_SWSURFACE);
@@ -36,9 +36,6 @@ int main(int argc, char** argv) {
   }
   if (SDL_MUSTLOCK(screen)) SDL_UnlockSurface(screen);
   SDL_Flip(screen);
-
-  printf("you should see a smoothly-colored square - no sharp lines but the square borders!\n");
-  printf("and here is some text that should be HTML-friendly: amp: |&| double-quote: |\"| quote: |'| less-than, greater-than, html-like tags: |<cheez></cheez>|\nanother line.\n");
 
   SDL_Quit();
 
