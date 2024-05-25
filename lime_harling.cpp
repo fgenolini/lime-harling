@@ -1,3 +1,5 @@
+/* SDL 2 game loop that shows a colourful square that changes colour over time
+*/
 
 #include <chrono>
 #include <thread>
@@ -7,7 +9,7 @@
 #include "SDL.h"
 #else
 // SDL1:
-//#include <SDL/SDL.h>
+// #include <SDL/SDL.h>
 #include <SDL2/SDL.h>
 #endif
 
@@ -15,8 +17,10 @@
 #include <emscripten.h>
 #endif
 
-constexpr Uint16 SCREEN_WIDTH = 256;
-constexpr Uint16 SCREEN_HEIGHT = 256;
+// Renderer size needs to be small to be usable in a web browser (emscripten)
+constexpr Uint16 SCREEN_WIDTH = 128;
+constexpr Uint16 SCREEN_HEIGHT = 64;
+
 static SDL_Window* window{};
 static SDL_Renderer* renderer{};
 #if SDL_MAJOR_VERSION < 2
@@ -25,6 +29,16 @@ static SDL_Surface* screen{};
 static Uint8 shift{};
 static SDL_Event event{};
 
+void end_sdl()
+{
+#if SDL_MAJOR_VERSION > 1
+  SDL_DestroyRenderer(renderer);
+  SDL_DestroyWindow(window);
+#endif
+  SDL_Quit();
+}
+
+// Render a single frame, to be called from the main game loop function
 void render_frame()
 {
   shift++;
@@ -96,6 +110,7 @@ void render_frame()
 #endif
 }
 
+// Main game loop that renders frames until user quits the game
 static void game_loop()
 {
 #ifdef __EMSCRIPTEN__
@@ -104,6 +119,7 @@ static void game_loop()
   int h{};
   SDL_GetRendererOutputSize(renderer, &w, &h);
   if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
+    // Frame rendering assumes a fixed dimension rendering surface
     printf("resolution change, w %d, h %d\n", w, h);
     emscripten_cancel_main_loop();
     return;
@@ -135,6 +151,7 @@ static void game_loop()
     int h{};
     SDL_GetRendererOutputSize(renderer, &w, &h);
     if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
+      // Frame rendering assumes a fixed dimension rendering surface
       printf("resolution change, w %d, h %d\n", w, h);
       want_out = true;
       continue;
@@ -160,8 +177,8 @@ static void game_loop()
 
     render_frame();
 
-    // 30 fps
-    std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    // 24 fps
+    std::this_thread::sleep_for(std::chrono::milliseconds(42));
   }
 #endif
 }
@@ -197,17 +214,12 @@ int main(int, char**)
 #endif
 
 #ifdef __EMSCRIPTEN__
-  constexpr auto FRAME_RATE = 30;
+  constexpr auto FRAME_RATE = 24;
   constexpr auto SIMULATE_INFINITE_LOOP = 1;
   emscripten_set_main_loop(game_loop, FRAME_RATE, SIMULATE_INFINITE_LOOP);
 #else
   game_loop();
 #endif
-
-#if SDL_MAJOR_VERSION > 1
-  SDL_DestroyRenderer(renderer);
-  SDL_DestroyWindow(window);
-#endif
-  SDL_Quit();
+  end_sdl();
   return 0;
 }
