@@ -25,6 +25,10 @@ SDL_Quit: () => {
 Download the SDL release archive for your platform,
 such as `SDL2-devel-2.30.3-VC.zip` and extract it on your computer.
 
+Use `cmake-gui`, point CMake to your SDL folder, and then generate a build project or `Makefile`, and use it to build and run the app.
+
+
+## Building for emscripten (C++ to web)
 Use a command such as
 ```bash
 emcc -std=c++20 -o index.html lime_harling.cpp --use-port=sdl2
