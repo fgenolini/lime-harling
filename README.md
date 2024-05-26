@@ -22,10 +22,22 @@ SDL_Quit: () => {
 
 ## Building SDL code natively on Windows using C++
 
+Install Visual Studio 2022 (with support for C++ 20) or the Build Tools for VS 2022.
+
 Download the SDL release archive for your platform,
 such as `SDL2-devel-2.30.3-VC.zip` and extract it on your computer.
 
-Use `cmake-gui`, point CMake to your SDL folder, and then generate a build project or `Makefile`, and use it to build and run the app.
+Use `cmake-gui`, point CMake to your SDL folder, and then generate a VS 2022 solution, and use it to build and run the app.
+
+If you use the command line tools, then type:
+
+```bat
+msbuild lime_harling.sln
+```
+
+Before you run the Windows executable just built, ensure that `SDL2.dll` is in your `PATH` (or copy it to the same place as `lime_harling.exe`).
+
+This will create a small window with no border and no title bar, showing an animated colourful square.  To exit, press the `Esc` key.
 
 
 ## Building for emscripten (C++ to web)
