@@ -1,17 +1,17 @@
 /* SDL 2 game loop that shows a colourful square that changes colour over time
 */
 
-#include <chrono>
-#include <thread>
-
 #include <stdio.h>
 #ifdef _WIN32
+// This may not be a Win32 (Windows / DOS) thing, but this is the case on my PC
 #include "SDL.h"
 #else
+// If the wrong include is used, then the emscripten display will be black
+
 // For SDL 1
 // #include <SDL/SDL.h>
 
-// For SLD 2
+// For SDL 2
 #include <SDL2/SDL.h>
 #endif
 
@@ -32,19 +32,21 @@ static SDL_Surface* screen{};
 static Uint8 shift{};
 static SDL_Event event{};
 
-void end_sdl()
+static void end_sdl() noexcept
 {
 #if SDL_MAJOR_VERSION > 1
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
 #endif
   SDL_Quit();
+  printf("SDL ended\n");
 }
 
 // Render a single frame, to be called from the main game loop function
-void render_frame()
+static void render_frame() noexcept
 {
 #if SDL_MAJOR_VERSION > 1
+  SDL_RenderClear(renderer);
   for (auto vert = 0; vert < SCREEN_HEIGHT; vert++)
   {
     for (auto horiz = 0; horiz < SCREEN_WIDTH; horiz++)
@@ -113,7 +115,7 @@ void render_frame()
 }
 
 // Main game loop that renders frames until user quits the game
-static void game_loop()
+static void game_loop() noexcept
 {
 #ifdef __EMSCRIPTEN__
   render_frame();
@@ -124,6 +126,7 @@ static void game_loop()
   if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
     // Frame rendering assumes a fixed dimension rendering surface
     printf("resolution change, w %d, h %d\n", w, h);
+    end_sdl();
     emscripten_cancel_main_loop();
     return;
   }
@@ -134,6 +137,7 @@ static void game_loop()
     {
     case SDL_QUIT:
       printf("quit\n");
+      end_sdl();
       emscripten_cancel_main_loop();
       break;
 
@@ -141,6 +145,7 @@ static void game_loop()
       switch (event.key.keysym.sym) {
       case SDLK_ESCAPE:
         printf("escape\n");
+        end_sdl();
         emscripten_cancel_main_loop();
         break;
       }
@@ -187,7 +192,7 @@ static void game_loop()
     if (frame_time > 0 && frame_time < 42)
     {
       // 24 fps
-      std::this_thread::sleep_for(std::chrono::milliseconds(42 - frame_time));
+      SDL_Delay((Uint32)(42 - frame_time));
     }
   }
 #endif
@@ -227,11 +232,8 @@ int main(int, char**)
   emscripten_set_main_loop(game_loop, FRAME_RATE, SIMULATE_INFINITE_LOOP);
 #else
   game_loop();
-#endif
-#ifdef __EMSCRIPTEN__
-  printf("Animation ended\n");
-#endif
   end_sdl();
+#endif
   return 0;
 }
 
