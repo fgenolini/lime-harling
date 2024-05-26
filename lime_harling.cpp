@@ -195,7 +195,12 @@ static void game_loop()
 
 int main(int, char**)
 {
+#ifdef __EMSCRIPTEN__
+  printf("Press the Esc key to end the animation\n");
+#else
   printf("Lime render of an external garden wall using a thrown mix of NHL lime and granite dust\n");
+#endif
+
 #if SDL_MAJOR_VERSION > 1
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
 #else
@@ -217,11 +222,14 @@ int main(int, char**)
 #endif
 
 #ifdef __EMSCRIPTEN__
-  constexpr auto FRAME_RATE = 24;
+  constexpr auto FRAME_RATE = 0;
   constexpr auto SIMULATE_INFINITE_LOOP = 1;
   emscripten_set_main_loop(game_loop, FRAME_RATE, SIMULATE_INFINITE_LOOP);
 #else
   game_loop();
+#endif
+#ifdef __EMSCRIPTEN__
+  printf("Animation ended\n");
 #endif
   end_sdl();
   return 0;
