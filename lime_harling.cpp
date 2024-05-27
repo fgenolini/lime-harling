@@ -20,8 +20,8 @@
 #endif
 
 // Renderer size needs to be small to be usable in a web browser (emscripten)
-constexpr Uint16 SCREEN_WIDTH = 256;
-constexpr Uint16 SCREEN_HEIGHT = 256;
+constexpr auto SCREEN_WIDTH = 256;
+constexpr auto SCREEN_HEIGHT = 256;
 
 #if SDL_MAJOR_VERSION > 1
 static SDL_Window* window{};
@@ -29,7 +29,7 @@ static SDL_Renderer* renderer{};
 #else
 static SDL_Surface* screen{};
 #endif
-static Uint8 shift{};
+static auto shift{0};
 static SDL_Event event{};
 
 static void end_sdl() noexcept
@@ -57,15 +57,15 @@ static void render_frame() noexcept
 #else
       // To emulate native behavior with blitting to screen, alpha component is ignored. Test that it is so by outputting
       // data (and testing that it does get discarded)
-      Uint8 alpha = (Uint8)((vert + horiz) % 255);
+      auto alpha = (Uint8)((vert + horiz) % 255);
 #endif
 
-      Uint8 r = (Uint8)vert;
-      Uint8 g = (Uint8)horiz;
-      Uint8 b = (Uint8)(255 - vert);
-      Uint8 rot_r = (Uint8)(r + shift);
-      Uint8 rot_g = (Uint8)(g - shift * 3);
-      Uint8 rot_b = (Uint8)(b + shift * 2);
+      auto r = (Uint8)vert;
+      auto g = (Uint8)horiz;
+      auto b = (Uint8)(255 - vert);
+      auto rot_r = (Uint8)(r + shift);
+      auto rot_g = (Uint8)(g - shift * 3);
+      auto rot_b = (Uint8)(b + shift * 2);
       SDL_SetRenderDrawColor(renderer, rot_r, rot_g, rot_b, alpha);
       SDL_RenderDrawPoint(renderer, horiz, vert);
     }
@@ -78,25 +78,25 @@ static void render_frame() noexcept
     SDL_LockSurface(screen);
   }
 
-  for (int i = 0; i < SCREEN_HEIGHT; i++)
+  for (auto i = 0; i < SCREEN_HEIGHT; i++)
   {
-    for (int j = 0; j < SCREEN_WIDTH; j++)
+    for (auto j = 0; j < SCREEN_WIDTH; j++)
     {
 #ifdef TEST_SDL_LOCK_OPTS
       // Alpha behaves like in the browser, so write proper opaque pixels.
-      int alpha = 255;
+      auto alpha = (Uint8)255;
 #else
       // To emulate native behavior with blitting to screen, alpha component is ignored. Test that it is so by outputting
       // data (and testing that it does get discarded)
-      int alpha = (i + j) % 255;
+      auto alpha = (Uint8)((i + j) % 255);
 #endif
-      Uint8 r = i;
-      Uint8 g = j;
-      Uint8 b = 255 - i;
-      auto rot_r = r + shift;
-      auto rot_g = g - shift * 3;
-      auto rot_b = b + shift * 2;
-      *((Uint32*)screen->pixels + i * 256 + j) = SDL_MapRGBA(screen->format,
+      auto r = (Uint8)i;
+      auto g = (Uint8)j;
+      auto b = (Uint8)(255 - i);
+      auto rot_r = (Uint8)(r + shift);
+      auto rot_g = (Uint8)(g - shift * 3);
+      auto rot_b = (Uint8)(b + shift * 2);
+      *((Uint32*)screen->pixels + i * SCREEN_WIDTH + j) = SDL_MapRGBA(screen->format,
         rot_r, rot_g, rot_b, alpha);
     }
   }
@@ -120,8 +120,8 @@ static void game_loop() noexcept
 #ifdef __EMSCRIPTEN__
   render_frame();
 #if SDL_MAJOR_VERSION > 1
-  int w{};
-  int h{};
+  auto w{0};
+  auto h{0};
   SDL_GetRendererOutputSize(renderer, &w, &h);
   if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
     // Frame rendering assumes a fixed dimension rendering surface
@@ -158,8 +158,8 @@ static void game_loop() noexcept
   while (!want_out) {
     auto start_ticks = SDL_GetTicks64();
 
-    int w{};
-    int h{};
+    auto w{0};
+    auto h{0};
     SDL_GetRendererOutputSize(renderer, &w, &h);
     if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
       // Frame rendering assumes a fixed dimension rendering surface
@@ -220,14 +220,14 @@ int main(int, char**)
     return 1;
   }
 
-  SDL_SetRenderDrawColor(renderer, 12, 123, 50, 255);
+  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
   SDL_RenderClear(renderer);
 #else
   screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_SWSURFACE);
 #endif
 
 #ifdef __EMSCRIPTEN__
-  constexpr auto FRAME_RATE = 0;
+  constexpr auto FRAME_RATE = 0; // auto determined
   constexpr auto SIMULATE_INFINITE_LOOP = 1;
   emscripten_set_main_loop(game_loop, FRAME_RATE, SIMULATE_INFINITE_LOOP);
 #else
