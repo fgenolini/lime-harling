@@ -7,12 +7,11 @@
 #include "SDL.h"
 #else
 // If the wrong include is used, then the emscripten display will be black
-
-// For SDL 1
-// #include <SDL/SDL.h>
-
-// For SDL 2
+#ifdef SDL1
+#include <SDL/SDL.h>
+#else
 #include <SDL2/SDL.h>
+#endif
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -29,7 +28,7 @@ static SDL_Renderer* renderer{};
 #else
 static SDL_Surface* screen{};
 #endif
-static auto shift{0};
+static auto shift{ 0 };
 static SDL_Event event{};
 
 static void end_sdl() noexcept
@@ -51,15 +50,7 @@ static void render_frame() noexcept
   {
     for (auto horiz = 0; horiz < SCREEN_WIDTH; horiz++)
     {
-#ifdef TEST_SDL_LOCK_OPTS
-      // Alpha behaves like in the browser, so write proper opaque pixels.
-      Uint8 alpha = 255;
-#else
-      // To emulate native behavior with blitting to screen, alpha component is ignored. Test that it is so by outputting
-      // data (and testing that it does get discarded)
-      auto alpha = (Uint8)((vert + horiz) % 255);
-#endif
-
+      auto alpha = (Uint8)255;
       auto r = (Uint8)vert;
       auto g = (Uint8)horiz;
       auto b = (Uint8)(255 - vert);
@@ -82,22 +73,15 @@ static void render_frame() noexcept
   {
     for (auto j = 0; j < SCREEN_WIDTH; j++)
     {
-#ifdef TEST_SDL_LOCK_OPTS
-      // Alpha behaves like in the browser, so write proper opaque pixels.
       auto alpha = (Uint8)255;
-#else
-      // To emulate native behavior with blitting to screen, alpha component is ignored. Test that it is so by outputting
-      // data (and testing that it does get discarded)
-      auto alpha = (Uint8)((i + j) % 255);
-#endif
       auto r = (Uint8)i;
       auto g = (Uint8)j;
       auto b = (Uint8)(255 - i);
       auto rot_r = (Uint8)(r + shift);
       auto rot_g = (Uint8)(g - shift * 3);
       auto rot_b = (Uint8)(b + shift * 2);
-      *((Uint32*)screen->pixels + i * SCREEN_WIDTH + j) = SDL_MapRGBA(screen->format,
-        rot_r, rot_g, rot_b, alpha);
+      *((Uint32*)screen->pixels + i * SCREEN_WIDTH + j) = SDL_MapRGBA(
+        screen->format, rot_r, rot_g, rot_b, alpha);
     }
   }
 
@@ -109,7 +93,8 @@ static void render_frame() noexcept
   SDL_Flip(screen);
 #endif
   shift++;
-  if (shift > 255) {
+  if (shift > 255)
+  {
     shift = 0;
   }
 }
@@ -120,10 +105,11 @@ static void game_loop() noexcept
 #ifdef __EMSCRIPTEN__
   render_frame();
 #if SDL_MAJOR_VERSION > 1
-  auto w{0};
-  auto h{0};
+  auto w{ 0 };
+  auto h{ 0 };
   SDL_GetRendererOutputSize(renderer, &w, &h);
-  if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
+  if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT)
+  {
     // Frame rendering assumes a fixed dimension rendering surface
     printf("resolution change, w %d, h %d\n", w, h);
     end_sdl();
@@ -132,7 +118,8 @@ static void game_loop() noexcept
   }
 #endif
 
-  if (SDL_PollEvent(&event)) {
+  if (SDL_PollEvent(&event))
+  {
     switch (event.type)
     {
     case SDL_QUIT:
@@ -142,7 +129,8 @@ static void game_loop() noexcept
       break;
 
     case SDL_KEYDOWN:
-      switch (event.key.keysym.sym) {
+      switch (event.key.keysym.sym)
+      {
       case SDLK_ESCAPE:
         printf("escape\n");
         end_sdl();
@@ -155,20 +143,22 @@ static void game_loop() noexcept
   }
 #else
   auto want_out{ false };
-  while (!want_out) {
+  while (!want_out)
+  {
     auto start_ticks = SDL_GetTicks64();
-
-    auto w{0};
-    auto h{0};
+    auto w{ 0 };
+    auto h{ 0 };
     SDL_GetRendererOutputSize(renderer, &w, &h);
-    if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
+    if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT)
+    {
       // Frame rendering assumes a fixed dimension rendering surface
       printf("resolution change, w %d, h %d\n", w, h);
       want_out = true;
       continue;
     }
 
-    while (SDL_PollEvent(&event) && !want_out) {
+    while (SDL_PollEvent(&event) && !want_out)
+    {
       switch (event.type)
       {
       case SDL_QUIT:
@@ -176,7 +166,8 @@ static void game_loop() noexcept
         break;
 
       case SDL_KEYDOWN:
-        switch (event.key.keysym.sym) {
+        switch (event.key.keysym.sym)
+        {
         case SDLK_ESCAPE:
           want_out = true;
           break;
@@ -205,7 +196,6 @@ int main(int, char**)
 #else
   printf("Lime render of an external garden wall using a thrown mix of NHL lime and granite dust\n");
 #endif
-
 #if SDL_MAJOR_VERSION > 1
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
 #else
@@ -215,7 +205,8 @@ int main(int, char**)
 #if SDL_MAJOR_VERSION > 1
   SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT,
     SDL_WINDOW_BORDERLESS, &window, &renderer);
-  if (window == NULL) {
+  if (window == NULL)
+  {
     fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
     return 1;
   }
@@ -225,7 +216,6 @@ int main(int, char**)
 #else
   screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_SWSURFACE);
 #endif
-
 #ifdef __EMSCRIPTEN__
   constexpr auto FRAME_RATE = 0; // auto determined
   constexpr auto SIMULATE_INFINITE_LOOP = 1;
