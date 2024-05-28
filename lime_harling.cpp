@@ -15,10 +15,20 @@ constexpr auto ALPHA = (Uint8)255;
 constexpr auto SCREEN_HEIGHT = 256;
 constexpr auto SCREEN_WIDTH = 256;
 constexpr auto WINDOW_TITLE = "Lime harling";
+#ifdef __EMSCRIPTEN__
+constexpr auto FRAME_RATE = 24; // frames per second
+constexpr auto SIMULATE_INFINITE_LOOP = 1;
+#endif
 
 #if SDL_MAJOR_VERSION > 1
 static SDL_Window *window{};
 static SDL_Renderer *renderer{};
+#ifndef __EMSCRIPTEN__
+static SDL_Texture *texture{};
+static SDL_PixelFormat *format{};
+static Uint32 *pixels{};
+static int pitch{};
+#endif
 #else
 static SDL_Surface *screen{};
 #endif
@@ -39,9 +49,27 @@ static auto screen_height{SCREEN_HEIGHT};
 static void end_sdl() noexcept
 {
 #if SDL_MAJOR_VERSION > 1
-  SDL_DestroyRenderer(renderer);
-  SDL_DestroyWindow(window);
+#ifndef __EMSCRIPTEN__
+  if (texture) [[likely]]
+  {
+    SDL_DestroyTexture(texture);
+    texture = nullptr;
+  }
 #endif
+
+  if (renderer) [[likely]]
+  {
+    SDL_DestroyRenderer(renderer);
+    renderer = nullptr;
+  }
+
+  if (window) [[likely]]
+  {
+    SDL_DestroyWindow(window);
+    window = nullptr;
+  }
+#endif
+
   SDL_Quit();
 }
 
@@ -55,8 +83,19 @@ static EM_BOOL on_canvas_resize(int, const void *, void *) noexcept
 #if SDL_MAJOR_VERSION > 1
 static void sdl2_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
 {
+#ifdef __EMSCRIPTEN__
   SDL_SetRenderDrawColor(renderer, r, g, b, ALPHA);
   SDL_RenderDrawPoint(renderer, x, y);
+#else
+  if (is_fullscreen) [[unlikely]]
+  {
+    SDL_SetRenderDrawColor(renderer, r, g, b, ALPHA);
+    SDL_RenderDrawPoint(renderer, x, y);
+    return;
+  }
+
+  pixels[y * screen_width + x] = SDL_MapRGBA(format, r, g, b, ALPHA);
+#endif
 }
 #else
 static void sdl1_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
@@ -93,7 +132,37 @@ static void render_frame() noexcept
 
 #if SDL_MAJOR_VERSION > 1
   SDL_RenderClear(renderer);
+#ifdef __EMSCRIPTEN__
   render_loop(sdl2_render_loop_fn);
+#else
+  if (is_fullscreen) [[unlikely]]
+  {
+    render_loop(sdl2_render_loop_fn);
+  }
+  else
+  {
+    if (SDL_LockTexture(texture, nullptr, (void **)&pixels, &pitch) != 0) [[unlikely]]
+    {
+      fprintf(stderr, "Could not lock texture: %s\n", SDL_GetError());
+      want_out = true;
+      return;
+    }
+
+    if (pixels) [[likely]]
+    {
+      render_loop(sdl2_render_loop_fn);
+    }
+
+    SDL_UnlockTexture(texture);
+    if (SDL_RenderCopy(renderer, texture, nullptr, nullptr) != 0) [[unlikely]]
+    {
+      fprintf(stderr, "Could not copy texture: %s\n", SDL_GetError());
+      want_out = true;
+      return;
+    }
+  }
+#endif
+
   SDL_RenderPresent(renderer);
 #else
   if (SDL_MUSTLOCK(screen)) [[likely]]
@@ -131,27 +200,36 @@ static void render_frame() noexcept
 #ifndef __EMSCRIPTEN__
 static void update_screen_size(int w, int h) noexcept
 {
-  SDL_SetWindowSize(window, w, h);
+  if (screen_width == w && screen_height == h) [[unlikely]]
+  {
+    return;
+  }
+
+  if (!is_fullscreen) [[likely]]
+  {
+    SDL_SetWindowSize(window, w, h);
+  }
+
   screen_width = w;
   screen_height = h;
+  if (texture) [[likely]]
+  {
+    SDL_DestroyTexture(texture);
+    texture = nullptr;
+  }
+
+  texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                              SDL_TEXTUREACCESS_STREAMING, screen_width, screen_height);
+  if (!texture) [[unlikely]]
+  {
+    fprintf(stderr, "Resized texture could not be created: %s\n", SDL_GetError());
+    want_out = true;
+  }
 }
 #endif
 
 static bool poll_event_once() noexcept
 {
-#if SDL_MAJOR_VERSION > 1
-  if (screen_width < 1 || screen_height < 1) [[unlikely]]
-  {
-    auto w{0};
-    auto h{0};
-    if (SDL_GetRendererOutputSize(renderer, &w, &h) == 0)
-    {
-      screen_width = w;
-      screen_height = h;
-    }
-  }
-#endif
-
   if (want_out) [[unlikely]]
   {
     return false;
@@ -184,12 +262,18 @@ static bool poll_event_once() noexcept
       break;
 
     default:
+      if (event.key.keysym.scancode == SDL_SCANCODE_Q) [[unlikely]]
+      {
+        want_out = true;
+        break;
+      }
+
       if (event.key.keysym.scancode == SDL_SCANCODE_F) [[unlikely]]
       {
-        screen_width = SCREEN_WIDTH;
-        screen_height = SCREEN_HEIGHT;
         if (!is_fullscreen)
         {
+          // Enter fullscreen
+          is_fullscreen = true;
 #ifdef __EMSCRIPTEN__
           strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_DEFAULT;
           strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
@@ -198,25 +282,82 @@ static bool poll_event_once() noexcept
           strategy.canvasResizedCallbackUserData = nullptr;
           emscripten_request_fullscreen_strategy("#canvas", false, &strategy);
 #else
-          SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
-          is_fullscreen = true;
+          if (texture) [[likely]]
+          {
+            SDL_DestroyTexture(texture);
+            texture = nullptr;
+          }
+
+          if (renderer) [[likely]]
+          {
+            SDL_DestroyRenderer(renderer);
+            renderer = nullptr;
+          }
+
+          // When testing on my computer the software renderer is much faster
+          // in fullscreen
+          renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+          if (!renderer) [[unlikely]]
+          {
+            fprintf(stderr, "Software renderer could not be created: %s\n",
+                    SDL_GetError());
+            return false;
+          }
+
+          // Fake fullscreen works, real fullscreen struggles with multiple monitors
+          if (SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) != 0)
+          {
+            fprintf(stderr, "Could not go fullscreen: %s\n", SDL_GetError());
+            want_out = true;
+            return false;
+          }
+
+          auto w{0};
+          auto h{0};
+          if (SDL_GetRendererOutputSize(renderer, &w, &h) != 0)
+          {
+            fprintf(stderr, "Could not get fullscreen size: %s\n", SDL_GetError());
+            want_out = true;
+            return false;
+          }
+
+          update_screen_size(w, h);
 #endif
         }
         else
         {
           // Exit fullscreen
+          is_fullscreen = false;
 #ifdef __EMSCRIPTEN__
           emscripten_exit_fullscreen();
 #else
+          if (texture) [[likely]]
+          {
+            SDL_DestroyTexture(texture);
+            texture = nullptr;
+          }
+
+          if (renderer) [[likely]]
+          {
+            SDL_DestroyRenderer(renderer);
+            renderer = nullptr;
+          }
+
+          // Accelerated renderer is faster with windowed (not fullscreen)
+          renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+          if (!renderer) [[unlikely]]
+          {
+            fprintf(stderr, "Accelerated renderer could not be created: %s\n",
+                    SDL_GetError());
+            return false;
+          }
+
           SDL_SetWindowFullscreen(window, 0);
-          is_fullscreen = false;
+          update_screen_size(SCREEN_WIDTH, SCREEN_HEIGHT);
+          SDL_SetWindowPosition(window,
+                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 #endif
         }
-
-#if SDL_MAJOR_VERSION > 1
-        SDL_SetWindowSize(window, screen_width, screen_height);
-        SDL_RenderSetLogicalSize(renderer, screen_width, screen_height);
-#endif
       }
 
       break;
@@ -378,51 +519,70 @@ static EM_BOOL on_web_fullscreen_changed(int event_type,
 
 static bool init_sdl() noexcept
 {
-  printf("Press the Esc key to end the animation\n");
+  printf("Press the Q or Esc key to end the animation\n");
   printf("Press the F key for full screen\n");
 #if SDL_MAJOR_VERSION > 1
-  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) [[unlikely]]
+  {
+    fprintf(stderr, "SDL could not be initialised: %s\n", SDL_GetError());
+    return false;
+  }
 #else
   SDL_Init(SDL_INIT_VIDEO);
 #endif
 
 #if SDL_MAJOR_VERSION > 1
-#ifdef __EMSCRIPTEN__
   window = SDL_CreateWindow(WINDOW_TITLE,
                             SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                             SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
-  if (window == NULL) [[unlikely]]
+  if (!window) [[unlikely]]
   {
     fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
     return false;
   }
 
+#ifdef __EMSCRIPTEN__
   // When testing on my computer the software renderer seems faster
-  // particularly when switching to fullscreen
-  renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+  // in my web browser, even more so in full screen
+  auto flags = SDL_RENDERER_SOFTWARE;
+#else
+  auto flags = SDL_RENDERER_ACCELERATED;
+#endif
+  renderer = SDL_CreateRenderer(window, -1, flags);
   if (!renderer) [[unlikely]]
   {
-    fprintf(stderr, "renderer could not be created: %s\n",
+    fprintf(stderr, "Renderer could not be created: %s\n",
             SDL_GetError());
     return false;
   }
-#else
-  SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT,
-                              SDL_WINDOW_RESIZABLE, &window, &renderer);
-  if (window == NULL) [[unlikely]]
+
+#ifndef __EMSCRIPTEN__
+  texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                              SDL_TEXTUREACCESS_STREAMING,
+                              SCREEN_WIDTH, SCREEN_HEIGHT);
+  if (!texture) [[unlikely]]
   {
-    fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
+    fprintf(stderr, "Texture could not be created: %s\n", SDL_GetError());
+    return false;
+  }
+
+  format = SDL_AllocFormat(SDL_PIXELFORMAT_RGBA8888);
+  if (!format) [[unlikely]]
+  {
+    fprintf(stderr, "Pixel format could not be created: %s\n", SDL_GetError());
     return false;
   }
 #endif
 
-  SDL_SetWindowTitle(window, WINDOW_TITLE);
-  SDL_RenderSetLogicalSize(renderer, SCREEN_WIDTH, SCREEN_HEIGHT);
-  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-  SDL_RenderClear(renderer);
 #else
   screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_SWSURFACE);
   SDL_WM_SetCaption(WINDOW_TITLE, nullptr);
+#endif
+#ifdef __EMSCRIPTEN__
+  emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW,
+                                 0, 0, on_web_display_size_changed);
+  emscripten_set_fullscreenchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT,
+                                           nullptr, false, on_web_fullscreen_changed);
 #endif
   return true;
 }
@@ -435,12 +595,6 @@ int main(int, char **)
   }
 
 #ifdef __EMSCRIPTEN__
-  emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW,
-                                 0, 0, on_web_display_size_changed);
-  emscripten_set_fullscreenchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT,
-                                           nullptr, false, on_web_fullscreen_changed);
-  constexpr auto FRAME_RATE = 24; // frames per second
-  constexpr auto SIMULATE_INFINITE_LOOP = 1;
   emscripten_set_main_loop(game_loop, FRAME_RATE, SIMULATE_INFINITE_LOOP);
 #else
   game_loop();
