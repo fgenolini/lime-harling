@@ -55,12 +55,12 @@ emcc -std=c++20 -o index.html lime_harling.cpp --use-port=sdl2
 emrun index.html
 ```
 
-### Suggested changes to emscripten
-The emsripten console is quite verbose, and not useful for users
+### Suggested changes to emscripten's SDL1
+The emsripten console can become quite verbose, and not useful for users
 (only for developers during debugging),
 so a lot of messages can simply be removed.
 
-In `upstream\emscripten\src\library_sdl.js`,
+For SDL1, in `upstream\emscripten\src\library_sdl.js`,
 comment out the line in `SDL_Quit()` :
 
 ```JavaScript

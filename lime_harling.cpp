@@ -11,9 +11,10 @@
 
 #include "SDL.h"
 
-constexpr auto SCREEN_WIDTH = 256;
-constexpr auto SCREEN_HEIGHT = 256;
 constexpr auto ALPHA = (Uint8)255;
+constexpr auto SCREEN_HEIGHT = 256;
+constexpr auto SCREEN_WIDTH = 256;
+constexpr auto WINDOW_TITLE = "Lime harling";
 
 #if SDL_MAJOR_VERSION > 1
 static SDL_Window *window{};
@@ -42,11 +43,10 @@ static void end_sdl() noexcept
   SDL_DestroyWindow(window);
 #endif
   SDL_Quit();
-  printf("SDL ended\n");
 }
 
 #ifdef __EMSCRIPTEN__
-static EM_BOOL on_canvas_resize(int, const void *, void *)
+static EM_BOOL on_canvas_resize(int, const void *, void *) noexcept
 {
   return false;
 }
@@ -86,7 +86,7 @@ static void render_loop(void(render_loop_fn)(int x, int y, Uint8 r, Uint8 g, Uin
 // Render a single frame, to be called from the main game loop function
 static void render_frame() noexcept
 {
-  if (screen_height < 1 || screen_width < 1)
+  if (screen_height < 1 || screen_width < 1) [[unlikely]]
   {
     return;
   }
@@ -96,13 +96,13 @@ static void render_frame() noexcept
   render_loop(sdl2_render_loop_fn);
   SDL_RenderPresent(renderer);
 #else
-  if (SDL_MUSTLOCK(screen))
+  if (SDL_MUSTLOCK(screen)) [[likely]]
   {
     SDL_LockSurface(screen);
   }
 
   render_loop(sdl1_render_loop_fn);
-  if (SDL_MUSTLOCK(screen))
+  if (SDL_MUSTLOCK(screen)) [[likely]]
   {
     SDL_UnlockSurface(screen);
   }
@@ -140,29 +140,31 @@ static void update_screen_size(int w, int h) noexcept
 static bool poll_event_once() noexcept
 {
 #if SDL_MAJOR_VERSION > 1
-  if (screen_width < 1 || screen_height < 1)
+  if (screen_width < 1 || screen_height < 1) [[unlikely]]
   {
     auto w{0};
     auto h{0};
-    SDL_GetRendererOutputSize(renderer, &w, &h);
-    screen_width = w;
-    screen_height = h;
+    if (SDL_GetRendererOutputSize(renderer, &w, &h) == 0)
+    {
+      screen_width = w;
+      screen_height = h;
+    }
   }
 #endif
 
-  if (want_out)
+  if (want_out) [[unlikely]]
   {
     return false;
   }
 
-  if (!SDL_PollEvent(&event))
+  if (!SDL_PollEvent(&event)) [[likely]]
   {
     return false;
   }
 
   switch (event.type)
   {
-  case SDL_QUIT:
+  [[unlikely]] case SDL_QUIT:
     want_out = true;
     break;
 
@@ -175,20 +177,14 @@ static bool poll_event_once() noexcept
 #endif
 
   case SDL_KEYDOWN:
-    auto key_name = SDL_GetKeyName(event.key.keysym.sym);
-    if (key_name && strcmp(key_name, "unknown key") != 0)
-    {
-      printf("%s\n", key_name);
-    }
-
     switch (event.key.keysym.sym)
     {
-    case SDLK_ESCAPE:
+    [[unlikely]] case SDLK_ESCAPE:
       want_out = true;
       break;
 
     default:
-      if (event.key.keysym.scancode == SDL_SCANCODE_F)
+      if (event.key.keysym.scancode == SDL_SCANCODE_F) [[unlikely]]
       {
         screen_width = SCREEN_WIDTH;
         screen_height = SCREEN_HEIGHT;
@@ -266,12 +262,11 @@ static void game_loop() noexcept
   {
     display_size_changed = false;
     fullscreen_changed = false;
-    if (!is_fullscreen && (screen_width < 1 || screen_height < 1))
+    if (!is_fullscreen && (screen_width < 1 || screen_height < 1)) [[unlikely]]
     {
       auto w{0.0};
       auto h{0.0};
       emscripten_get_element_css_size("#canvas", &w, &h);
-      printf("GL canvas size change, w %f, h %f\n", w, h);
 #if SDL_MAJOR_VERSION > 1
       SDL_SetWindowSize(window, (int)w, (int)h);
 #endif
@@ -280,26 +275,22 @@ static void game_loop() noexcept
     }
 
 #if SDL_MAJOR_VERSION > 1
-    if (screen_width < 1 || screen_height < 1)
+    if (screen_width < 1 || screen_height < 1) [[unlikely]]
     {
       auto w{0};
       auto h{0};
       SDL_GetRendererOutputSize(renderer, &w, &h);
       screen_width = w;
       screen_height = h;
-      printf("GL renderer size, w %d, h %d\n", w, h);
     }
 #endif
   }
 
   poll_event_once();
-  if (want_out)
+  if (want_out) [[unlikely]]
   {
-    printf("quit\n");
     end_sdl();
-#ifdef __EMSCRIPTEN__
     emscripten_cancel_main_loop();
-#endif
     return;
   }
 
@@ -310,7 +301,7 @@ static void game_loop() noexcept
     auto start_ticks = SDL_GetTicks64();
     while (poll_event_once())
     {
-      if (want_out)
+      if (want_out) [[unlikely]]
       {
         return;
       }
@@ -319,7 +310,7 @@ static void game_loop() noexcept
     render_frame();
     auto end_ticks = SDL_GetTicks64();
     auto frame_time = end_ticks - start_ticks;
-    if (frame_time > 0 && frame_time < 42)
+    if (frame_time > 0 && frame_time < 42) [[likely]]
     {
       // 24 fps
       SDL_Delay((Uint32)(42 - frame_time));
@@ -332,7 +323,7 @@ static void game_loop() noexcept
 static EM_BOOL on_web_display_size_changed(int event_type,
                                            const EmscriptenUiEvent *status, void *user_data) noexcept
 {
-  if (event_type != EMSCRIPTEN_EVENT_RESIZE)
+  if (event_type != EMSCRIPTEN_EVENT_RESIZE) [[unlikely]]
   {
     return false;
   }
@@ -363,7 +354,7 @@ static EM_BOOL on_web_fullscreen_changed(int event_type,
                                          const EmscriptenFullscreenChangeEvent *status,
                                          void *userData) noexcept
 {
-  if (event_type != EMSCRIPTEN_EVENT_FULLSCREENCHANGE)
+  if (event_type != EMSCRIPTEN_EVENT_FULLSCREENCHANGE) [[unlikely]]
   {
     return false;
   }
@@ -385,7 +376,7 @@ static EM_BOOL on_web_fullscreen_changed(int event_type,
 }
 #endif
 
-int main(int, char **)
+static bool init_sdl() noexcept
 {
   printf("Press the Esc key to end the animation\n");
   printf("Press the F key for full screen\n");
@@ -397,39 +388,52 @@ int main(int, char **)
 
 #if SDL_MAJOR_VERSION > 1
 #ifdef __EMSCRIPTEN__
-  window = SDL_CreateWindow("Lime harling",
+  window = SDL_CreateWindow(WINDOW_TITLE,
                             SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                             SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
-  if (window == NULL)
+  if (window == NULL) [[unlikely]]
   {
     fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
-    return 1;
+    return false;
   }
 
+  // When testing on my computer the software renderer seems faster
+  // particularly when switching to fullscreen
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-  if (!renderer)
+  if (!renderer) [[unlikely]]
   {
     fprintf(stderr, "renderer could not be created: %s\n",
             SDL_GetError());
-    return 1;
+    return false;
   }
 #else
   SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT,
                               SDL_WINDOW_RESIZABLE, &window, &renderer);
-  if (window == NULL)
+  if (window == NULL) [[unlikely]]
   {
     fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
-    return 1;
+    return false;
   }
 #endif
 
-  SDL_SetWindowTitle(window, "Lime harling");
+  SDL_SetWindowTitle(window, WINDOW_TITLE);
   SDL_RenderSetLogicalSize(renderer, SCREEN_WIDTH, SCREEN_HEIGHT);
   SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
   SDL_RenderClear(renderer);
 #else
   screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_SWSURFACE);
+  SDL_WM_SetCaption(WINDOW_TITLE, nullptr);
 #endif
+  return true;
+}
+
+int main(int, char **)
+{
+  if (!init_sdl())
+  {
+    return 1;
+  }
+
 #ifdef __EMSCRIPTEN__
   emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW,
                                  0, 0, on_web_display_size_changed);
