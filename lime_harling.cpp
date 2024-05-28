@@ -1,5 +1,7 @@
 /* SDL 2 game loop that shows a colourful square that changes colour over time
  *
+ * Supports fullscreen and windowed mode
+ *
  * Tested on Windows 11 PCs with multiple monitors, and on Google Chrome
  */
 
@@ -19,7 +21,6 @@ constexpr auto SCREEN_WIDTH = 256;
 constexpr auto WINDOW_TITLE = "Lime harling";
 #ifdef __EMSCRIPTEN__
 constexpr auto FRAME_RATE = 0; // automatically determined by browser
-// constexpr auto FRAME_RATE = 24; // frames per second
 constexpr auto SIMULATE_INFINITE_LOOP = 1;
 #endif
 
@@ -39,11 +40,13 @@ static SDL_Event event{};
 
 #ifdef __EMSCRIPTEN__
 static EmscriptenFullscreenStrategy strategy{};
+#else
+static Uint64 end_ticks{0};
+static Uint64 frame_time;
+static Uint64 start_ticks{0};
 #endif
 static auto is_fullscreen{false};
 static auto want_out{false};
-static auto screen_width{SCREEN_WIDTH};
-static auto screen_height{SCREEN_HEIGHT};
 
 static void end_sdl() noexcept
 {
@@ -70,31 +73,27 @@ static void end_sdl() noexcept
   SDL_Quit();
 }
 
-#ifdef __EMSCRIPTEN__
-static EM_BOOL on_canvas_resize(int, const void *, void *) noexcept
-{
-  return false;
-}
-#endif
-
 #if SDL_MAJOR_VERSION > 1
-static void sdl2_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
+// Render a single pixel with an RGB colour
+static void sdl2_render_pixel(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
 {
-  pixels[y * screen_width + x] = SDL_MapRGBA(format, r, g, b, ALPHA);
+  pixels[y * SCREEN_WIDTH + x] = SDL_MapRGBA(format, r, g, b, ALPHA);
 }
 #else
-static void sdl1_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
+static void sdl1_render_pixel(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
 {
-  *((Uint32 *)screen->pixels + y * screen_width + x) = SDL_MapRGBA(
+  *((Uint32 *)screen->pixels + y * SCREEN_WIDTH + x) = SDL_MapRGBA(
       screen->format, r, g, b, ALPHA);
 }
 #endif
 
-static void render_loop(void(render_loop_fn)(int x, int y, Uint8 r, Uint8 g, Uint8 b)) noexcept
+// Render a colourful square, where the colours change for each frame
+static void render_square(void(render_pixel)(int x, int y,
+                                             Uint8 r, Uint8 g, Uint8 b)) noexcept
 {
-  for (auto y = 0; y < screen_height; ++y)
+  for (auto y = 0; y < SCREEN_HEIGHT; ++y)
   {
-    for (auto x = 0; x < screen_width; ++x)
+    for (auto x = 0; x < SCREEN_WIDTH; ++x)
     {
       auto r = (Uint8)y;
       auto g = (Uint8)x;
@@ -102,7 +101,7 @@ static void render_loop(void(render_loop_fn)(int x, int y, Uint8 r, Uint8 g, Uin
       auto rot_r = (Uint8)(r + shift);
       auto rot_g = (Uint8)(g - shift * 3);
       auto rot_b = (Uint8)(b + shift * 2);
-      render_loop_fn(x, y, rot_r, rot_g, rot_b);
+      render_pixel(x, y, rot_r, rot_g, rot_b);
     }
   }
 }
@@ -110,11 +109,6 @@ static void render_loop(void(render_loop_fn)(int x, int y, Uint8 r, Uint8 g, Uin
 // Render a single frame, to be called from the main game loop function
 static void render_frame() noexcept
 {
-  if (screen_height < 1 || screen_width < 1) [[unlikely]]
-  {
-    return;
-  }
-
 #if SDL_MAJOR_VERSION > 1
   SDL_RenderClear(renderer);
   if (SDL_LockTexture(texture, nullptr, (void **)&pixels, &pitch) != 0) [[unlikely]]
@@ -124,11 +118,7 @@ static void render_frame() noexcept
     return;
   }
 
-  if (pixels) [[likely]]
-  {
-    render_loop(sdl2_render_loop_fn);
-  }
-
+  render_square(sdl2_render_pixel);
   SDL_UnlockTexture(texture);
   if (SDL_RenderCopy(renderer, texture, nullptr, nullptr) != 0) [[unlikely]]
   {
@@ -144,7 +134,7 @@ static void render_frame() noexcept
     SDL_LockSurface(screen);
   }
 
-  render_loop(sdl1_render_loop_fn);
+  render_square(sdl1_render_pixel);
   if (SDL_MUSTLOCK(screen)) [[likely]]
   {
     SDL_UnlockSurface(screen);
@@ -174,9 +164,6 @@ static void render_frame() noexcept
 #ifndef __EMSCRIPTEN__
 static void create_texture() noexcept
 {
-  // Scaled drawable dimensions, not screen size
-  screen_width = SCREEN_WIDTH;
-  screen_height = SCREEN_HEIGHT;
   if (texture) [[unlikely]]
   {
     SDL_DestroyTexture(texture);
@@ -184,10 +171,12 @@ static void create_texture() noexcept
   }
 
   texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-                              SDL_TEXTUREACCESS_STREAMING, screen_width, screen_height);
+                              SDL_TEXTUREACCESS_STREAMING,
+                              SCREEN_WIDTH, SCREEN_HEIGHT);
   if (!texture) [[unlikely]]
   {
-    fprintf(stderr, "Resized texture could not be created: %s\n", SDL_GetError());
+    fprintf(stderr, "Resized texture could not be created: %s\n",
+            SDL_GetError());
     want_out = true;
   }
 }
@@ -235,8 +224,6 @@ static bool poll_event_once() noexcept
           strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_DEFAULT;
           strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
           strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
-          strategy.canvasResizedCallback = on_canvas_resize;
-          strategy.canvasResizedCallbackUserData = nullptr;
           emscripten_request_fullscreen_strategy("#canvas", false, &strategy);
 #else
           if (texture) [[likely]]
@@ -261,8 +248,10 @@ static bool poll_event_once() noexcept
             return false;
           }
 
-          // Fake fullscreen works, real fullscreen struggles with multiple monitors
-          if (SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) != 0)
+          // Fake fullscreen works,
+          // real fullscreen struggles with multiple monitors
+          if (SDL_SetWindowFullscreen(window,
+                                      SDL_WINDOW_FULLSCREEN_DESKTOP) != 0) [[unlikely]]
           {
             fprintf(stderr, "Could not go fullscreen: %s\n", SDL_GetError());
             want_out = true;
@@ -332,7 +321,7 @@ static void game_loop() noexcept
 #else
   while (!want_out)
   {
-    auto start_ticks = SDL_GetTicks64();
+    start_ticks = SDL_GetTicks64();
     while (poll_event_once())
     {
       if (want_out) [[unlikely]]
@@ -342,8 +331,8 @@ static void game_loop() noexcept
     }
 
     render_frame();
-    auto end_ticks = SDL_GetTicks64();
-    auto frame_time = end_ticks - start_ticks;
+    end_ticks = SDL_GetTicks64();
+    frame_time = end_ticks - start_ticks;
     if (frame_time > 0 && frame_time < 17) [[likely]]
     {
       // 60 fps, common monitor refresh rate
@@ -417,7 +406,7 @@ static bool init_sdl() noexcept
 
 int main(int, char **)
 {
-  if (!init_sdl())
+  if (!init_sdl()) [[unlikely]]
   {
     return 1;
   }
