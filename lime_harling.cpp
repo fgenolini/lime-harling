@@ -1,5 +1,5 @@
 /* SDL 2 game loop that shows a colourful square that changes colour over time
-*/
+ */
 
 #include <stdio.h>
 #include <string.h>
@@ -16,23 +16,24 @@ constexpr auto SCREEN_HEIGHT = 256;
 constexpr auto ALPHA = (Uint8)255;
 
 #if SDL_MAJOR_VERSION > 1
-static SDL_Window* window{};
-static SDL_Renderer* renderer{};
+static SDL_Window *window{};
+static SDL_Renderer *renderer{};
 #else
-static SDL_Surface* screen{};
+static SDL_Surface *screen{};
 #endif
-static auto shift{ 0 };
-static auto flip{ false };
+static auto shift{0};
+static auto flip{false};
 static SDL_Event event{};
 
 #ifdef __EMSCRIPTEN__
-static auto display_size_changed{ false };
-static auto fullscreen_changed{ false };
+static auto display_size_changed{false};
+static auto fullscreen_changed{false};
 static EmscriptenFullscreenStrategy strategy{};
 #endif
-static auto is_fullscreen{ false };
-static auto screen_width{ SCREEN_WIDTH };
-static auto screen_height{ SCREEN_HEIGHT };
+static auto is_fullscreen{false};
+static auto want_out{false};
+static auto screen_width{SCREEN_WIDTH};
+static auto screen_height{SCREEN_HEIGHT};
 
 static void end_sdl() noexcept
 {
@@ -45,7 +46,7 @@ static void end_sdl() noexcept
 }
 
 #ifdef __EMSCRIPTEN__
-static EM_BOOL on_canvas_resize(int, const void*, void*)
+static EM_BOOL on_canvas_resize(int, const void *, void *)
 {
   return false;
 }
@@ -60,12 +61,12 @@ static void sdl2_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcep
 #else
 static void sdl1_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
 {
-  *((Uint32*)screen->pixels + y * screen_width + x) = SDL_MapRGBA(
-    screen->format, r, g, b, ALPHA);
+  *((Uint32 *)screen->pixels + y * screen_width + x) = SDL_MapRGBA(
+      screen->format, r, g, b, ALPHA);
 }
 #endif
 
-static void render_loop(void (render_loop_fn)(int x, int y, Uint8 r, Uint8 g, Uint8 b)) noexcept
+static void render_loop(void(render_loop_fn)(int x, int y, Uint8 r, Uint8 g, Uint8 b)) noexcept
 {
   for (auto y = 0; y < screen_height; ++y)
   {
@@ -136,6 +137,101 @@ static void update_screen_size(int w, int h) noexcept
 }
 #endif
 
+static bool poll_event_once() noexcept
+{
+#if SDL_MAJOR_VERSION > 1
+  if (screen_width < 1 || screen_height < 1)
+  {
+    auto w{0};
+    auto h{0};
+    SDL_GetRendererOutputSize(renderer, &w, &h);
+    screen_width = w;
+    screen_height = h;
+  }
+#endif
+
+  if (want_out)
+  {
+    return false;
+  }
+
+  if (!SDL_PollEvent(&event))
+  {
+    return false;
+  }
+
+  switch (event.type)
+  {
+  case SDL_QUIT:
+    want_out = true;
+    break;
+
+#ifndef __EMSCRIPTEN__
+  case SDL_WINDOWEVENT:
+    if (event.window.event == SDL_WINDOWEVENT_RESIZED)
+    {
+      update_screen_size(event.window.data1, event.window.data2);
+    }
+#endif
+
+  case SDL_KEYDOWN:
+    auto key_name = SDL_GetKeyName(event.key.keysym.sym);
+    if (key_name && strcmp(key_name, "unknown key") != 0)
+    {
+      printf("%s\n", key_name);
+    }
+
+    switch (event.key.keysym.sym)
+    {
+    case SDLK_ESCAPE:
+      want_out = true;
+      break;
+
+    default:
+      if (event.key.keysym.scancode == SDL_SCANCODE_F)
+      {
+        screen_width = SCREEN_WIDTH;
+        screen_height = SCREEN_HEIGHT;
+        if (!is_fullscreen)
+        {
+#ifdef __EMSCRIPTEN__
+          strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_DEFAULT;
+          strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
+          strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
+          strategy.canvasResizedCallback = on_canvas_resize;
+          strategy.canvasResizedCallbackUserData = nullptr;
+          emscripten_request_fullscreen_strategy("#canvas", false, &strategy);
+#else
+          SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+          is_fullscreen = true;
+#endif
+        }
+        else
+        {
+          // Exit fullscreen
+#ifdef __EMSCRIPTEN__
+          emscripten_exit_fullscreen();
+#else
+          SDL_SetWindowFullscreen(window, 0);
+          is_fullscreen = false;
+#endif
+        }
+
+#if SDL_MAJOR_VERSION > 1
+        SDL_SetWindowSize(window, screen_width, screen_height);
+        SDL_RenderSetLogicalSize(renderer, screen_width, screen_height);
+#endif
+      }
+
+      break;
+    }
+
+    break;
+  }
+
+  return true;
+}
+
 // Main game loop that renders frames until user quits the game
 static void game_loop() noexcept
 {
@@ -149,7 +245,8 @@ static void game_loop() noexcept
       SDL_SetWindowSize(window, screen_width, screen_height);
 #endif
     }
-    else {
+    else
+    {
       // Exit fullscreen
       screen_width = SCREEN_WIDTH;
       screen_height = SCREEN_HEIGHT;
@@ -158,7 +255,7 @@ static void game_loop() noexcept
       SDL_SetWindowSize(window, screen_width, screen_height);
 #else
       screen = SDL_SetVideoMode(screen_width, screen_height, 32,
-        SDL_SWSURFACE | SDL_RESIZABLE);
+                                SDL_SWSURFACE | SDL_RESIZABLE);
 #endif
     }
 
@@ -171,8 +268,8 @@ static void game_loop() noexcept
     fullscreen_changed = false;
     if (!is_fullscreen && (screen_width < 1 || screen_height < 1))
     {
-      auto w{ 0.0 };
-      auto h{ 0.0 };
+      auto w{0.0};
+      auto h{0.0};
       emscripten_get_element_css_size("#canvas", &w, &h);
       printf("GL canvas size change, w %f, h %f\n", w, h);
 #if SDL_MAJOR_VERSION > 1
@@ -185,8 +282,8 @@ static void game_loop() noexcept
 #if SDL_MAJOR_VERSION > 1
     if (screen_width < 1 || screen_height < 1)
     {
-      auto w{ 0 };
-      auto h{ 0 };
+      auto w{0};
+      auto h{0};
       SDL_GetRendererOutputSize(renderer, &w, &h);
       screen_width = w;
       screen_height = h;
@@ -195,123 +292,27 @@ static void game_loop() noexcept
 #endif
   }
 
-  render_frame();
-  if (SDL_PollEvent(&event))
+  poll_event_once();
+  if (want_out)
   {
-    switch (event.type)
-    {
-    case SDL_QUIT:
-      printf("quit\n");
-      end_sdl();
-      emscripten_cancel_main_loop();
-      break;
-
-    case SDL_KEYDOWN:
-      auto key_name = SDL_GetKeyName(event.key.keysym.sym);
-      if (key_name && strcmp(key_name, "unknown key") != 0)
-      {
-        printf("%s\n", key_name);
-      }
-
-      switch (event.key.keysym.sym)
-      {
-      case SDLK_ESCAPE:
-        end_sdl();
-        emscripten_cancel_main_loop();
-        break;
-
-      default:
-        if (event.key.keysym.scancode == SDL_SCANCODE_F)
-        {
-          if (!is_fullscreen)
-          {
-            strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_DEFAULT;
-            strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
-            strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
-            strategy.canvasResizedCallback = on_canvas_resize;
-            strategy.canvasResizedCallbackUserData = nullptr;
-            emscripten_request_fullscreen_strategy("#canvas", false, &strategy);
-          }
-          else
-          {
-            emscripten_exit_fullscreen();
-          }
-        }
-
-        break;
-      }
-
-      break;
-    }
+    printf("quit\n");
+    end_sdl();
+#ifdef __EMSCRIPTEN__
+    emscripten_cancel_main_loop();
+#endif
+    return;
   }
+
+  render_frame();
 #else
-  auto want_out{ false };
   while (!want_out)
   {
     auto start_ticks = SDL_GetTicks64();
-    if (screen_width < 1 || screen_height < 1)
+    while (poll_event_once())
     {
-      auto w{ 0 };
-      auto h{ 0 };
-      SDL_GetRendererOutputSize(renderer, &w, &h);
-      screen_width = w;
-      screen_height = h;
-    }
-
-    while (SDL_PollEvent(&event) && !want_out)
-    {
-      switch (event.type)
+      if (want_out)
       {
-      case SDL_QUIT:
-        want_out = true;
-        break;
-
-      case SDL_WINDOWEVENT:
-        if (event.window.event == SDL_WINDOWEVENT_RESIZED)
-        {
-          update_screen_size(event.window.data1, event.window.data2);
-        }
-
-        break;
-
-      case SDL_KEYDOWN:
-        auto key_name = SDL_GetKeyName(event.key.keysym.sym);
-        if (key_name && strcmp(key_name, "unknown key") != 0)
-        {
-          printf("%s\n", key_name);
-        }
-
-        switch (event.key.keysym.sym)
-        {
-        case SDLK_ESCAPE:
-          want_out = true;
-          break;
-
-        default:
-          if (event.key.keysym.scancode == SDL_SCANCODE_F)
-          {
-            screen_width = SCREEN_WIDTH;
-            screen_height = SCREEN_HEIGHT;
-            if (is_fullscreen)
-            {
-              // Exit fullscreen
-              SDL_SetWindowFullscreen(window, 0);
-              is_fullscreen = false;
-            }
-            else
-            {
-              SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
-              is_fullscreen = true;
-            }
-
-            SDL_SetWindowSize(window, screen_width, screen_height);
-            SDL_RenderSetLogicalSize(renderer, screen_width, screen_height);
-          }
-
-          break;
-        }
-
-        break;
+        return;
       }
     }
 
@@ -329,7 +330,7 @@ static void game_loop() noexcept
 
 #ifdef __EMSCRIPTEN__
 static EM_BOOL on_web_display_size_changed(int event_type,
-  const EmscriptenUiEvent* status, void* user_data) noexcept
+                                           const EmscriptenUiEvent *status, void *user_data) noexcept
 {
   if (event_type != EMSCRIPTEN_EVENT_RESIZE)
   {
@@ -342,8 +343,8 @@ static EM_BOOL on_web_display_size_changed(int event_type,
     return true;
   }
 
-  auto w{ 0.0 };
-  auto h{ 0.0 };
+  auto w{0.0};
+  auto h{0.0};
   emscripten_get_element_css_size("#canvas", &w, &h);
   if (w == screen_width && h == screen_height)
   {
@@ -359,8 +360,8 @@ static EM_BOOL on_web_display_size_changed(int event_type,
 }
 
 static EM_BOOL on_web_fullscreen_changed(int event_type,
-  const EmscriptenFullscreenChangeEvent* status,
-  void* userData) noexcept
+                                         const EmscriptenFullscreenChangeEvent *status,
+                                         void *userData) noexcept
 {
   if (event_type != EMSCRIPTEN_EVENT_FULLSCREENCHANGE)
   {
@@ -384,7 +385,7 @@ static EM_BOOL on_web_fullscreen_changed(int event_type,
 }
 #endif
 
-int main(int, char**)
+int main(int, char **)
 {
   printf("Press the Esc key to end the animation\n");
   printf("Press the F key for full screen\n");
@@ -397,8 +398,8 @@ int main(int, char**)
 #if SDL_MAJOR_VERSION > 1
 #ifdef __EMSCRIPTEN__
   window = SDL_CreateWindow("Lime harling",
-    SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-    SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
+                            SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+                            SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
   if (window == NULL)
   {
     fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
@@ -409,12 +410,12 @@ int main(int, char**)
   if (!renderer)
   {
     fprintf(stderr, "renderer could not be created: %s\n",
-      SDL_GetError());
+            SDL_GetError());
     return 1;
   }
 #else
   SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT,
-    SDL_WINDOW_RESIZABLE, &window, &renderer);
+                              SDL_WINDOW_RESIZABLE, &window, &renderer);
   if (window == NULL)
   {
     fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
@@ -431,9 +432,9 @@ int main(int, char**)
 #endif
 #ifdef __EMSCRIPTEN__
   emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW,
-    0, 0, on_web_display_size_changed);
+                                 0, 0, on_web_display_size_changed);
   emscripten_set_fullscreenchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT,
-    nullptr, false, on_web_fullscreen_changed);
+                                           nullptr, false, on_web_fullscreen_changed);
   constexpr auto FRAME_RATE = 24; // frames per second
   constexpr auto SIMULATE_INFINITE_LOOP = 1;
   emscripten_set_main_loop(game_loop, FRAME_RATE, SIMULATE_INFINITE_LOOP);
@@ -443,4 +444,3 @@ int main(int, char**)
 #endif
   return 0;
 }
-
