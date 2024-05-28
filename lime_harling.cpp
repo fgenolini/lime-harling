@@ -48,9 +48,9 @@ static Uint64 start_ticks{0};
 static auto is_fullscreen{false};
 static auto want_out{false};
 
-static void end_sdl() noexcept
-{
 #if SDL_MAJOR_VERSION > 1
+static void destroy_texture_renderer() noexcept
+{
   if (texture) [[likely]]
   {
     SDL_DestroyTexture(texture);
@@ -62,7 +62,13 @@ static void end_sdl() noexcept
     SDL_DestroyRenderer(renderer);
     renderer = nullptr;
   }
+}
+#endif
 
+static void end_sdl() noexcept
+{
+#if SDL_MAJOR_VERSION > 1
+  destroy_texture_renderer();
   if (window) [[likely]]
   {
     SDL_DestroyWindow(window);
@@ -221,22 +227,9 @@ static bool poll_event_once() noexcept
           // Enter fullscreen
           is_fullscreen = true;
 #ifdef __EMSCRIPTEN__
-          strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_DEFAULT;
-          strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
-          strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
           emscripten_request_fullscreen_strategy("#canvas", false, &strategy);
 #else
-          if (texture) [[likely]]
-          {
-            SDL_DestroyTexture(texture);
-            texture = nullptr;
-          }
-
-          if (renderer) [[likely]]
-          {
-            SDL_DestroyRenderer(renderer);
-            renderer = nullptr;
-          }
+          destroy_texture_renderer();
 
           // When testing on my computer the software renderer is much faster
           // in fullscreen
@@ -268,17 +261,7 @@ static bool poll_event_once() noexcept
 #ifdef __EMSCRIPTEN__
           emscripten_exit_fullscreen();
 #else
-          if (texture) [[likely]]
-          {
-            SDL_DestroyTexture(texture);
-            texture = nullptr;
-          }
-
-          if (renderer) [[likely]]
-          {
-            SDL_DestroyRenderer(renderer);
-            renderer = nullptr;
-          }
+          destroy_texture_renderer();
 
           // Accelerated renderer is faster with windowed (not fullscreen)
           renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -367,6 +350,10 @@ static bool init_sdl() noexcept
   }
 
 #ifdef __EMSCRIPTEN__
+  strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_DEFAULT;
+  strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
+  strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
+
   // When testing on my computer the software renderer seems faster
   // in my web browser, even more so in full screen
   auto flags = SDL_RENDERER_SOFTWARE;
