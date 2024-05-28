@@ -21,7 +21,7 @@ and then generate a VS 2022 solution, and use it to build and run the app.
 If you use the command line tools, then type:
 
 ```bat
-msbuild lime_harling.sln
+msbuild lime_harling.sln /t:Rebuild
 ```
 
 Before you run the Windows executable just built,

@@ -13,6 +13,7 @@
 
 constexpr auto SCREEN_WIDTH = 256;
 constexpr auto SCREEN_HEIGHT = 256;
+constexpr auto ALPHA = (Uint8)255;
 
 #if SDL_MAJOR_VERSION > 1
 static SDL_Window* window{};
@@ -50,6 +51,37 @@ static EM_BOOL on_canvas_resize(int, const void*, void*)
 }
 #endif
 
+#if SDL_MAJOR_VERSION > 1
+static void sdl2_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
+{
+  SDL_SetRenderDrawColor(renderer, r, g, b, ALPHA);
+  SDL_RenderDrawPoint(renderer, x, y);
+}
+#else
+static void sdl1_render_loop_fn(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
+{
+  *((Uint32*)screen->pixels + y * screen_width + x) = SDL_MapRGBA(
+    screen->format, r, g, b, ALPHA);
+}
+#endif
+
+static void render_loop(void (render_loop_fn)(int x, int y, Uint8 r, Uint8 g, Uint8 b)) noexcept
+{
+  for (auto y = 0; y < screen_height; ++y)
+  {
+    for (auto x = 0; x < screen_width; ++x)
+    {
+      auto r = (Uint8)y;
+      auto g = (Uint8)x;
+      auto b = (Uint8)(255 - y);
+      auto rot_r = (Uint8)(r + shift);
+      auto rot_g = (Uint8)(g - shift * 3);
+      auto rot_b = (Uint8)(b + shift * 2);
+      render_loop_fn(x, y, rot_r, rot_g, rot_b);
+    }
+  }
+}
+
 // Render a single frame, to be called from the main game loop function
 static void render_frame() noexcept
 {
@@ -60,22 +92,7 @@ static void render_frame() noexcept
 
 #if SDL_MAJOR_VERSION > 1
   SDL_RenderClear(renderer);
-  for (auto vert = 0; vert < screen_height; vert++)
-  {
-    for (auto horiz = 0; horiz < screen_width; horiz++)
-    {
-      auto alpha = (Uint8)255;
-      auto r = (Uint8)vert;
-      auto g = (Uint8)horiz;
-      auto b = (Uint8)(255 - vert);
-      auto rot_r = (Uint8)(r + shift);
-      auto rot_g = (Uint8)(g - shift * 3);
-      auto rot_b = (Uint8)(b + shift * 2);
-      SDL_SetRenderDrawColor(renderer, rot_r, rot_g, rot_b, alpha);
-      SDL_RenderDrawPoint(renderer, horiz, vert);
-    }
-  }
-
+  render_loop(sdl2_render_loop_fn);
   SDL_RenderPresent(renderer);
 #else
   if (SDL_MUSTLOCK(screen))
@@ -83,22 +100,7 @@ static void render_frame() noexcept
     SDL_LockSurface(screen);
   }
 
-  for (auto i = 0; i < screen_height; i++)
-  {
-    for (auto j = 0; j < screen_width; j++)
-    {
-      auto alpha = (Uint8)255;
-      auto r = (Uint8)i;
-      auto g = (Uint8)j;
-      auto b = (Uint8)(255 - i);
-      auto rot_r = (Uint8)(r + shift);
-      auto rot_g = (Uint8)(g - shift * 3);
-      auto rot_b = (Uint8)(b + shift * 2);
-      *((Uint32*)screen->pixels + i * screen_width + j) = SDL_MapRGBA(
-        screen->format, rot_r, rot_g, rot_b, alpha);
-    }
-  }
-
+  render_loop(sdl1_render_loop_fn);
   if (SDL_MUSTLOCK(screen))
   {
     SDL_UnlockSurface(screen);
