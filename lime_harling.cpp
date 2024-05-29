@@ -31,6 +31,10 @@ static Uint32 *pixels{};
 static int pitch{};
 static SDL_Texture *texture{};
 static SDL_PixelFormat *format{};
+
+// When testing on my computer the software renderer seems faster
+// in my web browser, even more so in full screen
+static auto flags{SDL_RENDERER_SOFTWARE};
 #else
 static SDL_Surface *screen{};
 #endif
@@ -42,7 +46,7 @@ static SDL_Event event{};
 static EmscriptenFullscreenStrategy strategy{};
 #else
 static Uint64 end_ticks{0};
-static Uint64 frame_time;
+static Uint64 frame_time{0};
 static Uint64 start_ticks{0};
 #endif
 static auto is_fullscreen{false};
@@ -79,23 +83,8 @@ static void end_sdl() noexcept
   SDL_Quit();
 }
 
-#if SDL_MAJOR_VERSION > 1
-// Render a single pixel with an RGB colour
-static void sdl2_render_pixel(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
-{
-  pixels[y * SCREEN_WIDTH + x] = SDL_MapRGBA(format, r, g, b, ALPHA);
-}
-#else
-static void sdl1_render_pixel(int x, int y, Uint8 r, Uint8 g, Uint8 b) noexcept
-{
-  *((Uint32 *)screen->pixels + y * SCREEN_WIDTH + x) = SDL_MapRGBA(
-      screen->format, r, g, b, ALPHA);
-}
-#endif
-
 // Render a colourful square, where the colours change for each frame
-static void render_square(void(render_pixel)(int x, int y,
-                                             Uint8 r, Uint8 g, Uint8 b)) noexcept
+static void render_square() noexcept
 {
   for (auto y = 0; y < SCREEN_HEIGHT; ++y)
   {
@@ -107,7 +96,15 @@ static void render_square(void(render_pixel)(int x, int y,
       auto rot_r = (Uint8)(r + shift);
       auto rot_g = (Uint8)(g - shift * 3);
       auto rot_b = (Uint8)(b + shift * 2);
-      render_pixel(x, y, rot_r, rot_g, rot_b);
+
+      // Render a single pixel with an RGB colour
+#if SDL_MAJOR_VERSION > 1
+      pixels[y * SCREEN_WIDTH + x] = SDL_MapRGBA(
+          format, rot_r, rot_g, rot_b, ALPHA);
+#else
+      *((Uint32 *)screen->pixels + y * SCREEN_WIDTH + x) = SDL_MapRGBA(
+          screen->format, rot_r, rot_g, rot_b, ALPHA);
+#endif
     }
   }
 }
@@ -117,16 +114,17 @@ static void render_frame() noexcept
 {
 #if SDL_MAJOR_VERSION > 1
   SDL_RenderClear(renderer);
-  if (SDL_LockTexture(texture, nullptr, (void **)&pixels, &pitch) != 0) [[unlikely]]
+  if (SDL_LockTexture(
+          texture, nullptr, (void **)&pixels, &pitch) < 0) [[unlikely]]
   {
     fprintf(stderr, "Could not lock texture: %s\n", SDL_GetError());
     want_out = true;
     return;
   }
 
-  render_square(sdl2_render_pixel);
+  render_square();
   SDL_UnlockTexture(texture);
-  if (SDL_RenderCopy(renderer, texture, nullptr, nullptr) != 0) [[unlikely]]
+  if (SDL_RenderCopy(renderer, texture, nullptr, nullptr) < 0) [[unlikely]]
   {
     fprintf(stderr, "Could not copy texture: %s\n", SDL_GetError());
     want_out = true;
@@ -140,7 +138,7 @@ static void render_frame() noexcept
     SDL_LockSurface(screen);
   }
 
-  render_square(sdl1_render_pixel);
+  render_square();
   if (SDL_MUSTLOCK(screen)) [[likely]]
   {
     SDL_UnlockSurface(screen);
@@ -157,11 +155,11 @@ static void render_frame() noexcept
     shift++;
   }
 
-  if (shift > 255)
+  if (shift > 255) [[unlikely]]
   {
     flip = true;
   }
-  else if (shift < 1)
+  else if (shift < 1) [[unlikely]]
   {
     flip = false;
   }
@@ -176,9 +174,9 @@ static void create_texture() noexcept
     texture = nullptr;
   }
 
-  texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-                              SDL_TEXTUREACCESS_STREAMING,
-                              SCREEN_WIDTH, SCREEN_HEIGHT);
+  texture = SDL_CreateTexture(
+      renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
+      SCREEN_WIDTH, SCREEN_HEIGHT);
   if (!texture) [[unlikely]]
   {
     fprintf(stderr, "Resized texture could not be created: %s\n",
@@ -187,6 +185,68 @@ static void create_texture() noexcept
   }
 }
 #endif
+
+static bool handle_fullscreen()
+{
+  if (!is_fullscreen)
+  {
+    // Enter fullscreen
+    is_fullscreen = true;
+#ifdef __EMSCRIPTEN__
+    emscripten_request_fullscreen_strategy("#canvas", false, &strategy);
+#else
+    destroy_texture_renderer();
+
+    // When testing on my computer the software renderer is much faster
+    // in fullscreen
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    if (!renderer) [[unlikely]]
+    {
+      fprintf(stderr, "Software renderer could not be created: %s\n",
+              SDL_GetError());
+      return false;
+    }
+
+    // Fake fullscreen works,
+    // real fullscreen struggles with multiple monitors
+    if (SDL_SetWindowFullscreen(
+            window, SDL_WINDOW_FULLSCREEN_DESKTOP) < 0) [[unlikely]]
+    {
+      fprintf(stderr, "Could not go fullscreen: %s\n", SDL_GetError());
+      want_out = true;
+      return false;
+    }
+
+    create_texture();
+#endif
+  }
+  else
+  {
+    // Exit fullscreen
+    is_fullscreen = false;
+#ifdef __EMSCRIPTEN__
+    emscripten_exit_fullscreen();
+#else
+    destroy_texture_renderer();
+
+    // Accelerated renderer is faster with windowed (not fullscreen)
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer) [[unlikely]]
+    {
+      fprintf(stderr, "Accelerated renderer could not be created: %s\n",
+              SDL_GetError());
+      return false;
+    }
+
+    SDL_SetWindowFullscreen(window, 0);
+    create_texture();
+    SDL_SetWindowPosition(
+        window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+#endif
+  }
+
+  return true;
+}
 
 static bool poll_event_once() noexcept
 {
@@ -206,7 +266,7 @@ static bool poll_event_once() noexcept
     want_out = true;
     break;
 
-  case SDL_KEYDOWN:
+  [[unlikely]] case SDL_KEYDOWN:
     switch (event.key.keysym.sym)
     {
     [[unlikely]] case SDLK_ESCAPE:
@@ -222,61 +282,9 @@ static bool poll_event_once() noexcept
 
       if (event.key.keysym.scancode == SDL_SCANCODE_F) [[unlikely]]
       {
-        if (!is_fullscreen)
+        if (!handle_fullscreen())
         {
-          // Enter fullscreen
-          is_fullscreen = true;
-#ifdef __EMSCRIPTEN__
-          emscripten_request_fullscreen_strategy("#canvas", false, &strategy);
-#else
-          destroy_texture_renderer();
-
-          // When testing on my computer the software renderer is much faster
-          // in fullscreen
-          renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-          if (!renderer) [[unlikely]]
-          {
-            fprintf(stderr, "Software renderer could not be created: %s\n",
-                    SDL_GetError());
-            return false;
-          }
-
-          // Fake fullscreen works,
-          // real fullscreen struggles with multiple monitors
-          if (SDL_SetWindowFullscreen(window,
-                                      SDL_WINDOW_FULLSCREEN_DESKTOP) != 0) [[unlikely]]
-          {
-            fprintf(stderr, "Could not go fullscreen: %s\n", SDL_GetError());
-            want_out = true;
-            return false;
-          }
-
-          create_texture();
-#endif
-        }
-        else
-        {
-          // Exit fullscreen
-          is_fullscreen = false;
-#ifdef __EMSCRIPTEN__
-          emscripten_exit_fullscreen();
-#else
-          destroy_texture_renderer();
-
-          // Accelerated renderer is faster with windowed (not fullscreen)
-          renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-          if (!renderer) [[unlikely]]
-          {
-            fprintf(stderr, "Accelerated renderer could not be created: %s\n",
-                    SDL_GetError());
-            return false;
-          }
-
-          SDL_SetWindowFullscreen(window, 0);
-          create_texture();
-          SDL_SetWindowPosition(window,
-                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-#endif
+          return false;
         }
       }
 
@@ -296,7 +304,9 @@ static void game_loop() noexcept
   poll_event_once();
   if (want_out) [[unlikely]]
   {
+    // Will not return
     emscripten_cancel_main_loop();
+    end_sdl();
     return;
   }
 
@@ -330,7 +340,7 @@ static bool init_sdl() noexcept
   printf("Press the Q or Esc key to end the animation\n");
   printf("Press the F key for full screen\n");
 #if SDL_MAJOR_VERSION > 1
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) [[unlikely]]
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) [[unlikely]]
   {
     fprintf(stderr, "SDL could not be initialised: %s\n", SDL_GetError());
     return false;
@@ -340,9 +350,9 @@ static bool init_sdl() noexcept
 #endif
 
 #if SDL_MAJOR_VERSION > 1
-  window = SDL_CreateWindow(WINDOW_TITLE,
-                            SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                            SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
+  window = SDL_CreateWindow(
+      WINDOW_TITLE, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+      SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
   if (!window) [[unlikely]]
   {
     fprintf(stderr, "Window could not be created: %s\n", SDL_GetError());
@@ -353,12 +363,8 @@ static bool init_sdl() noexcept
   strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_DEFAULT;
   strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
   strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
-
-  // When testing on my computer the software renderer seems faster
-  // in my web browser, even more so in full screen
-  auto flags = SDL_RENDERER_SOFTWARE;
 #else
-  auto flags = SDL_RENDERER_ACCELERATED;
+  flags = SDL_RENDERER_ACCELERATED;
 #endif
   renderer = SDL_CreateRenderer(window, -1, flags);
   if (!renderer) [[unlikely]]
@@ -368,9 +374,9 @@ static bool init_sdl() noexcept
     return false;
   }
 
-  texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-                              SDL_TEXTUREACCESS_STREAMING,
-                              SCREEN_WIDTH, SCREEN_HEIGHT);
+  texture = SDL_CreateTexture(
+      renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING,
+      SCREEN_WIDTH, SCREEN_HEIGHT);
   if (!texture) [[unlikely]]
   {
     fprintf(stderr, "Texture could not be created: %s\n", SDL_GetError());
@@ -399,10 +405,11 @@ int main(int, char **)
   }
 
 #ifdef __EMSCRIPTEN__
+  // Will not return
   emscripten_set_main_loop(game_loop, FRAME_RATE, SIMULATE_INFINITE_LOOP);
 #else
   game_loop();
-#endif
   end_sdl();
+#endif
   return 0;
 }
