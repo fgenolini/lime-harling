@@ -14,6 +14,7 @@
 #endif
 
 #include "SDL.h"
+#include "SDL_hints.h"
 
 constexpr auto ALPHA = (Uint8)255;
 constexpr auto SCREEN_HEIGHT = 256;
@@ -35,6 +36,8 @@ static SDL_PixelFormat *format{};
 // When testing on my computer the software renderer seems faster
 // in my web browser, even more so in full screen
 static auto flags{SDL_RENDERER_SOFTWARE};
+
+static auto is_android{false};
 #else
 static SDL_Surface *screen{};
 #endif
@@ -266,6 +269,15 @@ static bool poll_event_once() noexcept
     want_out = true;
     break;
 
+  [[unlikely]] case SDL_FINGERDOWN:
+    // touch screen (mobile)
+    if (!handle_fullscreen())
+    {
+      return false;
+    }
+
+    break;
+
   [[unlikely]] case SDL_KEYDOWN:
     switch (event.key.keysym.sym)
     {
@@ -350,6 +362,11 @@ static bool init_sdl() noexcept
 #endif
 
 #if SDL_MAJOR_VERSION > 1
+  if (strcmp(SDL_GetPlatform(), "Android") == 0) [[unlikely]]
+  {
+    is_android = true;
+  }
+
   window = SDL_CreateWindow(
       WINDOW_TITLE, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
       SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
