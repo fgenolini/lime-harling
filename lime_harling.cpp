@@ -2,7 +2,9 @@
  *
  * Supports fullscreen and windowed mode
  *
- * Tested on Windows 11 PCs with multiple monitors, and on Google Chrome
+ * Tested on Windows 11 PCs with multiple monitors,
+ * on Google Chrome on desktop,
+ * and on Android phones (on Chrome)
  */
 
 #include <stdio.h>
@@ -35,9 +37,7 @@ static SDL_PixelFormat *format{};
 
 // When testing on my computer the software renderer seems faster
 // in my web browser, even more so in full screen
-static auto flags{SDL_RENDERER_SOFTWARE};
-
-static auto is_android{false};
+static Uint32 flags{SDL_RENDERER_SOFTWARE};
 #else
 static SDL_Surface *screen{};
 #endif
@@ -189,9 +189,9 @@ static void create_texture() noexcept
 }
 #endif
 
-static bool handle_fullscreen()
+static bool handle_fullscreen() noexcept
 {
-  if (!is_fullscreen)
+  if (!is_fullscreen) [[likely]]
   {
     // Enter fullscreen
     is_fullscreen = true;
@@ -271,7 +271,7 @@ static bool poll_event_once() noexcept
 
   [[unlikely]] case SDL_FINGERDOWN:
     // touch screen (mobile)
-    if (!handle_fullscreen())
+    if (!handle_fullscreen()) [[unlikely]]
     {
       return false;
     }
@@ -294,7 +294,7 @@ static bool poll_event_once() noexcept
 
       if (event.key.keysym.scancode == SDL_SCANCODE_F) [[unlikely]]
       {
-        if (!handle_fullscreen())
+        if (!handle_fullscreen()) [[unlikely]]
         {
           return false;
         }
@@ -362,11 +362,6 @@ static bool init_sdl() noexcept
 #endif
 
 #if SDL_MAJOR_VERSION > 1
-  if (strcmp(SDL_GetPlatform(), "Android") == 0) [[unlikely]]
-  {
-    is_android = true;
-  }
-
   window = SDL_CreateWindow(
       WINDOW_TITLE, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
       SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
